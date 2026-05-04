@@ -2,7 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import yfinance as yf
 import pandas as pd
-from pandas_datareader import data as pdr
+import requests
+from io import StringIO
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -83,16 +84,21 @@ def stooq_symbol(sym, market):
     return s
 
 def fetch_stooq(sym, market):
+    """Fetch latest close from Stooq CSV API directly (no pandas-datareader)."""
     stooq_sym = stooq_symbol(sym, market)
     if not stooq_sym:
         return None
     try:
-        end = datetime.utcnow()
-        start = end - timedelta(days=10)
-        df = pdr.DataReader(stooq_sym, 'stooq', start, end)
-        if df is None or df.empty:
+        url = f'https://stooq.com/q/d/l/?s={stooq_sym}&i=d'
+        r = requests.get(url, timeout=8, headers={'User-Agent': 'Mozilla/5.0'})
+        if r.status_code != 200 or 'No data' in r.text or len(r.text) < 50:
             return None
-        df = df.sort_index()
+        df = pd.read_csv(StringIO(r.text))
+        if df.empty or 'Close' not in df.columns:
+            return None
+        df = df.dropna(subset=['Close'])
+        if len(df) == 0:
+            return None
         price = float(df['Close'].iloc[-1])
         prev = float(df['Close'].iloc[-2]) if len(df) > 1 else price
         if price <= 0:
@@ -119,11 +125,12 @@ def fetch_info(sym, yahoo_sym, market=''):
 
 @app.route('/')
 def root():
-    return jsonify({'ok': True, 'service': 'nexus-prices', 'endpoints': ['/health','/prices?s=SYM&market=us','/indices?s=^spx']})
+    return jsonify({'ok': True, 'service': 'nexus-prices',
+                    'endpoints': ['/health','/prices?s=SYM&market=us','/indices?s=^spx']})
 
 @app.route('/health')
 def health():
-    return jsonify({'ok': True, 'service': 'nexus-prices', 'version': 1})
+    return jsonify({'ok': True, 'service': 'nexus-prices', 'version': 2})
 
 @app.route('/indices')
 def indices():
