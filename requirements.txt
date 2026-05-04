@@ -2,6 +2,6 @@ flask
 flask-cors
 yfinance
 pandas
-pandas-datareader
 gunicorn
 lxml
+requests
